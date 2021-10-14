@@ -3710,6 +3710,68 @@ func TestGenerateProxyPassProtocol(t *testing.T) {
 	}
 }
 
+func TestGenerateGRPCPass(t *testing.T) {
+	tests := []struct {
+		grpcEnabled  bool
+		tlsEnabled   bool
+		upstreamName string
+		expected     string
+	}{
+		{
+			grpcEnabled:  false,
+			tlsEnabled:   false,
+			upstreamName: "test-upstream",
+			expected:     "",
+		},
+		{
+			grpcEnabled:  true,
+			tlsEnabled:   false,
+			upstreamName: "test-upstream",
+			expected:     "grpc://test-upstream",
+		},
+		{
+			grpcEnabled:  true,
+			tlsEnabled:   true,
+			upstreamName: "test-upstream",
+			expected:     "grpcs://test-upstream",
+		},
+	}
+
+	for _, test := range tests {
+		result := generateGRPCPass(test.grpcEnabled, test.tlsEnabled, test.upstreamName)
+		if result != test.expected {
+			t.Errorf("generateGRPCPass(%v, %v, %v) returned %v but expected %v", test.grpcEnabled, test.tlsEnabled, test.upstreamName, result, test.expected)
+		}
+	}
+}
+
+func TestGenerateGRPCPassProtocol(t *testing.T) {
+	tests := []struct {
+		upstream conf_v1.Upstream
+		expected string
+	}{
+		{
+			upstream: conf_v1.Upstream{},
+			expected: "grpc",
+		},
+		{
+			upstream: conf_v1.Upstream{
+				TLS: conf_v1.UpstreamTLS{
+					Enable: true,
+				},
+			},
+			expected: "grpcs",
+		},
+	}
+
+	for _, test := range tests {
+		result := generateGRPCPassProtocol(test.upstream.TLS.Enable)
+		if result != test.expected {
+			t.Errorf("generateGRPCPassProtocol(%v) returned %v but expected %v", test.upstream.TLS.Enable, result, test.expected)
+		}
+	}
+}
+
 func TestGenerateString(t *testing.T) {
 	tests := []struct {
 		inputS   string
@@ -3838,6 +3900,49 @@ func TestGenerateLocationForProxying(t *testing.T) {
 	result := generateLocationForProxying(path, upstreamName, conf_v1.Upstream{}, &cfgParams, nil, false, 0, "", nil, "", vsLocSnippets, false, "", "")
 	if diff := cmp.Diff(expected, result); diff != "" {
 		t.Errorf("generateLocationForProxying() mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestGenerateLocationForGrpcProxying(t *testing.T) {
+	cfgParams := ConfigParams{
+		ProxyConnectTimeout:  "30s",
+		ProxyReadTimeout:     "31s",
+		ProxySendTimeout:     "32s",
+		ClientMaxBodySize:    "1m",
+		ProxyMaxTempFileSize: "1024m",
+		ProxyBuffering:       true,
+		ProxyBuffers:         "8 4k",
+		ProxyBufferSize:      "4k",
+		LocationSnippets:     []string{"# location snippet"},
+		HTTP2:                true,
+	}
+	path := "/"
+	upstreamName := "test-upstream"
+	vsLocSnippets := []string{"# vs location snippet"}
+
+	expected := version2.Location{
+		Path:                     "/",
+		Snippets:                 vsLocSnippets,
+		ProxyConnectTimeout:      "30s",
+		ProxyReadTimeout:         "31s",
+		ProxySendTimeout:         "32s",
+		ClientMaxBodySize:        "1m",
+		ProxyMaxTempFileSize:     "1024m",
+		ProxyBuffering:           true,
+		ProxyBuffers:             "8 4k",
+		ProxyBufferSize:          "4k",
+		ProxyPass:                "http://test-upstream",
+		ProxyNextUpstream:        "error timeout",
+		ProxyNextUpstreamTimeout: "0s",
+		ProxyNextUpstreamTries:   0,
+		ProxyPassRequestHeaders:  true,
+		ProxySetHeaders:          []version2.Header{{Name: "Host", Value: "$host"}},
+		GRPCPass:                 "grpc://test-upstream",
+	}
+
+	result := generateLocationForProxying(path, upstreamName, conf_v1.Upstream{Type: "grpc"}, &cfgParams, nil, false, 0, "", nil, "", vsLocSnippets, false, "", "")
+	if !reflect.DeepEqual(result, expected) {
+		t.Errorf("TestGenerateLocationForGrpcProxying() returned \n%v but expected \n%v", result, expected)
 	}
 }
 
